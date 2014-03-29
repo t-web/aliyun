@@ -5,18 +5,22 @@ import (
 	"net/http"
 	"net/url"
 	"sort"
+	"strconv"
 	"testing"
 )
 
-func TestT(t *testing.T) {
-	heads := oss.Heads{&oss.Head{"ba", "1"}, &oss.Head{"b0", "2"}, &oss.Head{"a", "3"}}
+func testT(t *testing.T) {
+	heads := make(oss.UserMetadata)
+	for k, v := range heads {
+		heads[i].SetKey(strconv.FormatInt(int64(i*3+10), 13))
+	}
 	sort.Sort(heads)
 	for _, v := range heads {
 		t.Log(v)
 	}
 }
 
-func TestTT(t *testing.T) {
+func testTT(t *testing.T) {
 	req := http.Request{}
 	req.Method = "PUT"
 	req.URL = &url.URL{Path: "/nelson"}
@@ -29,12 +33,14 @@ func TestTT(t *testing.T) {
 	req.Header.Set("X-OSS-Meta-Author", "foo@bar.com")
 	req.Header.Set("X-OSS-Magic", "abracadabra")
 
-	meta := oss.Meta{}
+	meta := oss.Metadata{}
 	meta.SetAuth(&oss.Auth{
 		AccessKey: "44CF9590006BF252F707",
 		SecretKey: "OtxrzxIsfpFjA7SwPzILwy8Bw21TLhquhboDYROV",
 	})
 	meta.SetRequest(&req)
 	t.Log("Request: ", req)
-	t.Log("Meta: ", meta.Resource)
+	for _, v := range meta.GetUserMetadata() {
+		t.Log("Meta: ", *v)
+	}
 }
