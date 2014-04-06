@@ -1,46 +1,125 @@
 /*
-
-*/
+ */
 package oss
 
 import (
+	"crypto/hmac"
+	"crypto/sha1"
 	"encoding/base64"
 	"fmt"
-	"github.com/stduolc/util"
-	"io"
+	"github.com/stduolc/aliyun/oss/consts"
 	"io/ioutil"
 	"log"
 	"net/http"
-	"net/url"
-	"os"
+	// "net/url"
+	"strings"
 	"time"
-	//	"strconv"
 )
 
 const (
-	debug       = false
-	DefaultHost = "http://oss.aliyuncs.com"
-
-	HangZhou         = "oss-cn-hangzhou.aliyuncs.com"
-	QingDao          = "oss-cn-qingdao.aliyuncs.com"
-	HangZhouInternal = "oss-cn-hangzhou-internal.aliyuncs.com"
-	QingdaoInternal  = "oss-cn-qingdao-internal.aliyuncs.com"
-	DefaultRegion    = "oss.aliyuncs.com"
+	debug = false
 )
+
+type Auth struct {
+	AccessKey string
+	SecretKey string
+	Scheme    string
+	Domain    string
+}
 
 type OSSClient struct {
 	Auth   *Auth
 	Client *http.Client
 }
 
-func NewOSSClient(accessId, accessKey string) *OSSClient {
+func NewOSSClient(accessId, accessKey, domain string) *OSSClient {
 	ret := new(OSSClient)
-	ret.Auth = &Auth{AccessKey: accessId, SecretKey: accessKey}
-	ret.Client = new(http.Client)
+	ret.Auth = &Auth{AccessKey: accessId, SecretKey: accessKey, Scheme: "http", Domain: domain}
+	tr := &http.Transport{
+		DisableCompression: true,
+		DisableKeepAlives:  false,
+	}
+	ret.Client = &http.Client{Transport: tr}
 	return ret
 }
 
+func (o *OSSClient) execute(meta *ObjectMetadata) *http.Response {
+	o.SignMeta(meta)
+	req, err := meta.CreateRequest()
+
+	meta.WriteHttpHeaders()
+
+	if err != nil {
+		log.Panic(err)
+		return nil
+	}
+
+	resp, err := o.Client.Do(req)
+
+	// DEVELOP ACHOR
+	if err == nil {
+		defer resp.Body.Close()
+		bytes, _ := ioutil.ReadAll(resp.Body)
+		log.Println(string(bytes))
+		return resp
+	} else {
+		log.Panic(err)
+		return nil
+	}
+}
+
+func (o *OSSClient) PutBucket(bucketName, host string) *Bucket {
+	bucketName = strings.Trim(bucketName, " ")
+
+	meta := o.ObjectMetadata()
+	meta.SetHttpHeader(consts.RFC2616_METHOD, "PUT")
+
+	meta.SetBucketName(bucketName)
+	meta.SetHttpHeader(consts.RFC2616_HOST, meta.GetBucketName()+"."+meta.OSSClient.Auth.Domain)
+	meta.SetContentType("")
+	t := time.Now()
+	meta.SetDate(t.UTC().Format(consts.RFC1123G))
+
+	o.SignMeta(meta)
+
+	o.execute(meta)
+
+	return nil
+}
+
+func (c *OSSClient) ObjectMetadata() *ObjectMetadata {
+	ret, err := newObjectMetadata(c)
+	if err != nil {
+		log.Println(err)
+		return nil
+	}
+	ret.SetHttpHeader(consts.RFC2616_USER_ANGENT, "aliyun-sdk-go/0.1")
+	ret.SetHttpHeader(consts.RFC2616_CONNECTION, "Keep-Alive")
+	return ret
+}
+
+func (o *OSSClient) SignMeta(meta *ObjectMetadata) {
+	method := meta.GetHttpHeader(consts.RFC2616_METHOD)[0]
+	contentMd5 := meta.GetHttpHeader(consts.RFC2616_CONTENT_MD5)[0]
+	contentType := meta.GetHttpHeader(consts.RFC2616_CONTENT_TYPE)[0]
+	date := meta.GetHttpHeader(consts.RFC2616_DATE)[0]
+	str := fmt.Sprint(method, "\n", contentMd5, "\n", contentType, "\n", date, "\n")
+
+	// add CanonicalizedResources
+	res := meta.GetCanonicalizedResources()
+	str = fmt.Sprint(str, res)
+
+	mac := hmac.New(sha1.New, []byte(o.Auth.SecretKey))
+	mac.Write([]byte(str))
+	dst := base64.StdEncoding.EncodeToString(mac.Sum(nil))
+	signature := dst
+
+	authorization := fmt.Sprint("OSS ", o.Auth.AccessKey, ":", signature)
+	meta.SetHttpHeader(consts.RFC2616_AUTHORIZATION, authorization)
+}
+
 //MD5计算上存在问题，需要把整个文件读入内存。
+/*
 func (c *OSSClient) PutObjectRequest(bucketName string, objName string, reader io.Reader, meta *ObjectMetadata) {
 	req := http.Request{}
 	req.Header = make(map[string][]string)
@@ -71,7 +150,9 @@ func (c *OSSClient) PutObjectRequest(bucketName string, objName string, reader i
 	log.Println("\n:REQUEST:\n", req.Header)
 	log.Println("\n:RESPONSE:\n", resp.Header, "\n", string(body))
 }
+*/
 
+/*
 func (c *OSSClient) PutObjectRequest(bucketName string, key string, file os.File) (ret *PutObjectRequest, err error) {
 	req := http.Request{}
 	req.Header = make(map[string][]string)
@@ -92,19 +173,20 @@ func (c *OSSClient) PutObjectRequest(bucketName string, key string, file os.File
 	// 将Req中的特殊信息改写meta
 	meta.MergeRequest(&req)
 
-	/*
-		, err := ioutil.ReadAll(reader)
-		if err != nil {
-			log.Fatal(err)
-		}
-	*/
+//		, err := ioutil.ReadAll(reader)
+//		if err != nil {
+//		 	log.Fatal(err)
+//		 }
+
 	//req.Write(bytes)
 	resp, err := c.Client.Do(&req)
 	body, _ := ioutil.ReadAll(resp.Body)
 	log.Println("\n:REQUEST:\n", req.Header)
 	log.Println("\n:RESPONSE:\n", resp.Header, "\n", string(body))
 }
+*/
 
+/*
 func (c *OSSClient) PutObject(putReq *PutObjectRequest) (ret *PutObjectResult, err error) {
 	if nil == putReq {
 		return nil, Error("Nil param putObjectRequest")
@@ -140,8 +222,10 @@ func (c *OSSClient) PutObject(putReq *PutObjectRequest) (ret *PutObjectResult, e
 		// and then read length bytes of data from the inputstream to buff, and calculate the sum5md.
 		md5 := util.MD5File(file)
 		contentMD5 := base64.StdEncoding.EncodeToString(md5)
-		metadata.setContentMd5(contentMD5)
+		metadata.setcontentmd5(contentmd5)
+
+		req := createrequest(bucketname, key, putreq, method.put)
 
 	}
-
 }
+*/

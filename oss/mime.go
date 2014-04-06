@@ -19,7 +19,7 @@ var mimeTypes = map[string]string{
 
 func TypeByExtension(ext string) string {
 	t, ok := mimeTypes[ext]
-	if ok == nil {
+	if ok {
 		return t
 	} else {
 		return "unkown"

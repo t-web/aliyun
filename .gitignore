@@ -19,4 +19,8 @@ _cgo_export.*
 
 _testmain.go
 
+*.log
+*.pcapng
+
 *.exe
+*.bak

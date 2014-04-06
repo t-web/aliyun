@@ -1,369 +1,378 @@
 package oss
 
 import (
-	"crypto/hmac"
-	"crypto/sha1"
-	"encoding/base64"
+	// "crypto/hmac"
+	// "crypto/sha1"
+	// "encoding/base64"
+	"errors"
 	"fmt"
+	"github.com/stduolc/aliyun/oss/consts"
+	// "log"
 	"net/http"
+	"net/url"
 	"sort"
 	"strconv"
-	"strings"
-	"time"
 )
 
-type Auth struct {
-	AccessKey string
-	SecretKey string
-}
-
 type ObjectMetadata struct {
-	auth      *Auth
-	ossClient *OSSClient
-	req       *http.Request
-	method    string
+	OSSClient *OSSClient
+	Req       *http.Request
 
-	host          string
-	contentLength int64
-	contentMD5    string
-	contentType   string
-	date          string
-	resource      string
+	kvpool map[string]string
 
-	signature     string
-	authorization string
+	httpHeader map[string][]string
+	ossHeader  map[string][]string
 
-	// the date when the object is no longer cacheable
-	httpExpiresDate time.Date
-
-	// The time this object will expire and be completely removed from S3, or null if this object will never expire.
-	// This and the expiration time rule aren't stored in the metadata map because the header contains both the time and the rule.
-	expirationTime time.Date
-
-	userMetadata map[string]string
-	metadata     map[string]string
-	AES          string
+	AES string
 }
 
 // ObjectMetadata Factory Function
 // You should get a ObjectMetadata before you did any request
-func NewObjectMetadata() *ObjectMetadata {
+func newObjectMetadata(c *OSSClient) (*ObjectMetadata, error) {
 	ret := new(ObjectMetadata)
-	initMetadata(ret)
-	return ret
+	ret.OSSClient = c
+	ret.Req = nil
+
+	ret.kvpool = make(map[string]string)
+
+	ret.httpHeader = make(map[string][]string)
+	ret.ossHeader = make(map[string][]string)
+
+	return ret, nil
 }
 
-func (obj *ObjectMetadata) GetUserMetadata() map[string]string {
-	return obj.userMetadata
+func (meta *ObjectMetadata) CreateRequest() (*http.Request, error) {
+	if meta.Req != nil {
+		return nil, errors.New("meta had been used!")
+	}
+	// meta.signr()
+	meta.Req = new(http.Request)
+
+	uri := meta.GetURI()
+	meta.Req.URL, _ = url.Parse(uri)
+
+	meta.Req.Header = make(map[string][]string)
+	meta.Req.Method = meta.GetMethod()
+
+	//	meta.writeHttpHeaders()
+
+	//	meta.writeOSSHeaders()
+
+	// MARK
+	return meta.Req, nil
 }
 
-// Sets the custom user-metadata for the associated object.
-func (obj *ObjectMetadata) SetUserMetadata(usermetadata map[string]string) {
-	obj.userMetadata = usermetadata
-}
-
-func (obj *ObjectMetadata) SetHeader(key, value string) {
-	obj.metadata[key] = value
-}
-
-func (obj *ObjectMetadata) AddUserMetadata(key, value string) {
-	obj.userMetadata[key] = value
-}
-
-func (obj *ObjectMetadata) GetLastModified() (time.Date, error) {
-	date, ok := obj.metadata[Header.LAST_MODIFIED]
-	if ok == nil {
-		ret := time.Parse(TIME_LAYOUT, date)
-		return ret, nil
+func (obj *ObjectMetadata) SetHttpHeader(key, value string) {
+	if v, ok := obj.httpHeader[key]; ok {
+		obj.httpHeader[key] = append(v, value)
+		sort.Strings(v)
+		return
 	} else {
-		return nil, Error("no last_modified header")
+		obj.httpHeader[key] = make([]string, 1)
+		obj.httpHeader[key][0] = value
+		return
 	}
 }
 
-func (obj *ObjectMetadata) SetLastModified(date time.Date) {
-	obj.metadata[Header.LAST_MODIFIED] = string(date)
+func (obj *ObjectMetadata) GetHttpHeader(key string) []string {
+	if v, ok := obj.httpHeader[key]; ok {
+		return v
+	} else {
+		return []string{""}
+	}
 }
 
-func (obj *ObjectMetadata) GetContentLength() (int64, error) {
-	ret, ok := obj.metadata[Header.CONTENT_LENGTH]
-	if ok == nil {
-		return strconv.ParseInt(ret, 10, 64), nil
+func (obj *ObjectMetadata) SetOSSHeader(key, value string) {
+	if _, ok := obj.ossHeader[key]; ok {
+		obj.ossHeader[key] = append(obj.ossHeader[key], value)
+		sort.Strings(obj.ossHeader[key])
+		return
 	} else {
-		return nil, Error("no Content-length header")
+		obj.ossHeader[key] = make([]string, 1)
+		obj.ossHeader[key][0] = value
+		return
+	}
+}
+
+func (obj *ObjectMetadata) GetOSSHeader(key string) []string {
+	if val, ok := obj.httpHeader[key]; ok {
+		return val
+	} else {
+		return []string{""}
+	}
+}
+
+// GETTER/SETTER FOR HTTP HEADER
+
+func (obj *ObjectMetadata) GetContentLength() int64 {
+	if ret, ok := obj.httpHeader[consts.RFC2616_CONTENT_LENGTH]; ok {
+		i, _ := strconv.ParseInt(ret[0], 10, 64)
+		return i
+	} else {
+		return int64(-1)
 	}
 }
 
 func (obj *ObjectMetadata) SetContentLength(i int64) {
-	obj.metadata[Header.CONTENT_LENGTH] = strconv.FormatInt(i, 10)
-}
-
-func (obj *ObjectMetadata) GetContentType() (string, error) {
-	ret, ok := obj.metadata[Header.CONTENT_TYPE]
-	if ok == nil {
-		return ret, nil
+	if v, ok := obj.httpHeader[consts.CONTENT_LENGTH]; ok {
+		v[0] = strconv.FormatInt(i, 10)
+		return
 	} else {
-		return nil, Error("no Content-Type header")
+		obj.httpHeader[consts.RFC2616_CONTENT_LENGTH] = make([]string, 1)
+		obj.httpHeader[consts.RFC2616_CONTENT_LENGTH][0] = strconv.FormatInt(i, 10)
+		return
 	}
 }
 
-func (obj *ObjectMetadata) SetContenType(t string) {
-	obj.metadata[Header.CONTENT_TYPE] = t
-}
-
-func (obj *ObjectMetadata) GetContentEncoding() (string, error) {
-	ret, ok := obj.metadata[Header.CONTENT_ENCODING]
-	if ok == nil {
-		return ret, nil
+func (obj *ObjectMetadata) GetContentType() string {
+	if ret, ok := obj.httpHeader[consts.RFC2616_CONTENT_TYPE]; ok {
+		return ret[0]
 	} else {
-		return nil, Error("no Content-Encoding header")
+		return ""
 	}
 }
 
-func (obj *ObjectMetadata) SetContentEncoding(e string) {
-	obj.metadata[Header.CONTENT_ENCODING] = e
+func (obj *ObjectMetadata) SetContentType(t string) {
+	if _, ok := obj.httpHeader[consts.RFC2616_CONTENT_TYPE]; ok {
+		obj.httpHeader[consts.RFC2616_CONTENT_TYPE][0] = t
+		return
+	} else {
+		obj.httpHeader[consts.RFC2616_CONTENT_TYPE] = make([]string, 1)
+		obj.httpHeader[consts.RFC2616_CONTENT_TYPE][0] = t
+		return
+	}
 }
 
-func (obj *ObjectMetadata) GetCacheControl() (string, error) {
-	ret, ok := obj.metadata[Header.CACHE_CONTROL]
-	if ok == nil {
-		return ret, nil
+func (obj *ObjectMetadata) GetContentEncoding() string {
+	if ret, ok := obj.httpHeader[consts.RFC2616_CONTENT_ENCODING]; ok {
+		return ret[0]
 	} else {
-		return nil, Error("no " + Header.CACHE_CONTROL + " header")
+		return ""
+	}
+}
+
+func (obj *ObjectMetadata) SetContentEncoding(t string) {
+	if _, ok := obj.httpHeader[consts.RFC2616_CONTENT_ENCODING]; ok {
+		obj.httpHeader[consts.RFC2616_CONTENT_ENCODING][0] = t
+		return
+	} else {
+		obj.httpHeader[consts.RFC2616_CONTENT_ENCODING] = make([]string, 1)
+		obj.httpHeader[consts.RFC2616_CONTENT_ENCODING][0] = t
+		return
+	}
+}
+
+func (obj *ObjectMetadata) GetCacheControl() string {
+	if ret, ok := obj.httpHeader[consts.RFC2616_CACHE_CONTROL]; ok {
+		return ret[0]
+	} else {
+		return ""
 	}
 }
 
 func (obj *ObjectMetadata) SetCacheControl(c string) {
-	obj.metadata[Header.CACHE_CONTROL] = c
-}
-
-func (obj *ObjectMetadata) GetContentMd5() (string, error) {
-	ret, ok := obj.metadata[Header.CONTENT_MD5]
-	if ok == nil {
-		return ret, nil
+	if _, ok := obj.httpHeader[consts.RFC2616_CACHE_CONTROL]; ok {
+		obj.httpHeader[consts.RFC2616_CACHE_CONTROL][0] = c
+		return
 	} else {
-		return nil, Error("no " + Header.CONTENT_MD5 + " header")
+		obj.httpHeader[consts.RFC2616_CACHE_CONTROL] = make([]string, 1)
+		obj.httpHeader[consts.RFC2616_CACHE_CONTROL][0] = c
+		return
 	}
 }
 
-func (obj *ObjectMetadata) SetContentMd5(md5Base64 string) {
-	if md5Base64 == nil {
-		delete(obj.metadata, Header.CONTENT_MD5)
+func (obj *ObjectMetadata) GetContentMd5() string {
+	if ret, ok := obj.httpHeader[consts.RFC2616_CONTENT_MD5]; ok {
+		return ret[0]
 	} else {
-		obj.metadata[Header.CONTENT_MD5] = md5Base64
+		return ""
 	}
 }
 
-func (obj *ObjectMetadata) GetContentDisposition() (string, error) {
-	ret, ok := obj.metadata[Header.CONTENT_DISPOSITION]
-	if ok == nil {
-		return ret, nil
+func (obj *ObjectMetadata) SetContentMd5(c string) {
+	if _, ok := obj.httpHeader[consts.RFC2616_CONTENT_MD5]; ok {
+		obj.httpHeader[consts.RFC2616_CONTENT_MD5][0] = c
+		return
 	} else {
-		return nil, Error("no " + Header.CONTENT_DISPOSITION + " header")
+		obj.httpHeader[consts.RFC2616_CONTENT_MD5] = make([]string, 1)
+		obj.httpHeader[consts.RFC2616_CONTENT_MD5][0] = c
+		return
 	}
 }
 
-func (obj *ObjectMetadata) SetContentDisposition(d string) {
-	obj.metadata[Header.CONTENT_DISPOSITION] = d
-}
-
-func (obj *ObjectMetadata) GetETage() (string, error) {
-	ret, ok := obj.metadata[Header.ETAG]
-	if ok == nil {
-		return ret, nil
+func (obj *ObjectMetadata) GetContentDisposition() string {
+	if ret, ok := obj.httpHeader[consts.RFC2616_CONTENT_MD5]; ok {
+		return ret[0]
 	} else {
-		return nil, Error("no " + Header.ETAG + " header")
+		return ""
 	}
 }
 
-func (obj *ObjectMetadata) GetServerSideEncryption() (string, error) {
-	ret, ok := obj.metadata[Header.SERVER_SIDE_ENCRYPTION]
-	if ok == nil {
-		return ret, nil
+func (obj *ObjectMetadata) SetContentDisposition(c string) {
+	if _, ok := obj.httpHeader[consts.RFC2616_CONTENT_DISPOSITION]; ok {
+		obj.httpHeader[consts.RFC2616_CONTENT_DISPOSITION][0] = c
+		return
 	} else {
-		return nil, Error("no " + Header.SERVER_SIDE_ENCRYPTION + " header")
+		obj.httpHeader[consts.RFC2616_CONTENT_DISPOSITION] = make([]string, 1)
+		obj.httpHeader[consts.RFC2616_CONTENT_DISPOSITION][0] = c
+		return
+	}
+}
+
+func (obj *ObjectMetadata) GetDate() string {
+	if ret, ok := obj.httpHeader[consts.RFC2616_DATE]; ok {
+		return ret[0]
+	} else {
+		return ""
+	}
+}
+
+func (obj *ObjectMetadata) SetDate(date string) {
+	if _, ok := obj.httpHeader[consts.RFC2616_DATE]; ok {
+		obj.httpHeader[consts.RFC2616_DATE][0] = date
+		return
+	} else {
+		obj.httpHeader[consts.RFC2616_DATE] = make([]string, 1)
+		obj.httpHeader[consts.RFC2616_DATE][0] = date
+		return
+	}
+}
+
+func (obj *ObjectMetadata) GetLastModified() string {
+	if ret, ok := obj.httpHeader[consts.RFC2616_LAST_MODIFIED]; ok {
+		return ret[0]
+	} else {
+		return ""
+	}
+}
+
+func (obj *ObjectMetadata) SetLastModified(s string) {
+	if _, ok := obj.httpHeader[consts.RFC2616_LAST_MODIFIED]; ok {
+		obj.httpHeader[consts.RFC2616_LAST_MODIFIED][0] = s
+		return
+	} else {
+		obj.httpHeader[consts.RFC2616_LAST_MODIFIED] = make([]string, 1)
+		obj.httpHeader[consts.RFC2616_LAST_MODIFIED][0] = s
+		return
+	}
+}
+
+// GETTER/SETTER FOR URL
+
+func (obj *ObjectMetadata) GetURI() string {
+	uri := obj.GetScheme() + "://"
+	uri = uri + obj.GetHost()
+	return uri
+}
+
+func (obj *ObjectMetadata) GetScheme() string {
+	return obj.OSSClient.Auth.Scheme
+}
+
+func (m *ObjectMetadata) GetHost() string {
+	if _, ok := m.httpHeader[consts.HOST]; ok {
+		return m.httpHeader[consts.RFC2616_HOST][0]
+	} else {
+		return ""
+	}
+}
+
+func (obj *ObjectMetadata) GetBucketName() string {
+	v, ok := obj.kvpool["BucketName"]
+	if ok {
+		return v
+	} else {
+		return ""
+	}
+}
+
+func (obj *ObjectMetadata) SetBucketName(s string) {
+	if s == "" {
+		delete(obj.kvpool, "BucketName")
+	} else {
+		obj.kvpool["BucketName"] = s
+	}
+}
+
+func (obj *ObjectMetadata) GetObjectName() string {
+	v, ok := obj.kvpool["ObjectName"]
+	if ok {
+		return v
+	} else {
+		return ""
+	}
+}
+
+func (obj *ObjectMetadata) SetObjectName(s string) {
+	if s == "" {
+		delete(obj.kvpool, "ObjectName")
+	} else {
+		obj.kvpool["ObjectName"] = s
+	}
+}
+
+// GETTER/SETTER FOR Canonicalize Resources
+func (obj *ObjectMetadata) GetCanonicalizedResources() string {
+	ret := ""
+	ret = fmt.Sprint(ret, "/", obj.GetBucketName(), "/", obj.GetObjectName())
+	return ret
+}
+
+// 缺少子资源
+func (obj *ObjectMetadata) GetResources() string {
+	ret := ""
+	objName := obj.GetObjectName()
+	ret = ret + "/" + objName
+	return ret
+}
+
+func (obj *ObjectMetadata) GetServerSideEncryption() []string {
+	ret, ok := obj.httpHeader[consts.SERVER_SIDE_ENCRYPTION]
+	if ok {
+		return ret
+	} else {
+		return []string{""}
 	}
 }
 
 func (obj *ObjectMetadata) SetServerSideEncryption(s string) {
-	obj.metadata[Header.SERVER_SIDE_ENCRYPTION] = s
-}
-
-func (obj *ObjectMetadata) GetExpirationTime() time.Date {
-	return obj.expirationTime
-}
-
-func (obj *ObjectMetadata) SetExpirationTime(t time.Date) {
-	obj.expirationTime = t
-}
-
-func (obj *ObjectMetadata) GetHttpExpiresDate() time.Date {
-	return obj.httpExpiresDate
-}
-
-func (obj *ObjectMetadata) SetHttpExpiresDate(t time.Date) {
-	obj.httpExpiresDate = t
-}
-
-//
-func (m *ObjectMetadata) setRequest(req *http.Request) {
-	m.setContentType(req)
-	m.setDate(req)
-	m.setOSSHeaders(req)
-	m.setResource(req)
-
-	m.signr()
-	m.req = req
-}
-
-func (m *ObjectMetadata) PushRequest(req *http.Request) {
-	req.Header.Set("Content-Length", strconv.FormatInt(m.GetContentLength(), 10))
-	req.Header.Set("Content-Type", m.GetContentType())
-	req.Header.Set("Date", m.date)
-	req.Header.Set("Authorization", m.authorization)
-	m.setRequest(req)
-}
-
-func (m *ObjectMetadata) MergeRequest(req *http.Request) {
-	m.method = req.Method
-	m.host = req.URL.Host
+	if _, ok := obj.httpHeader[consts.SERVER_SIDE_ENCRYPTION]; ok {
+		obj.httpHeader[consts.SERVER_SIDE_ENCRYPTION][0] = s
+		return
+	} else {
+		obj.httpHeader[consts.SERVER_SIDE_ENCRYPTION] = make([]string, 1)
+		obj.httpHeader[consts.SERVER_SIDE_ENCRYPTION][0] = s
+		return
+	}
 }
 
 func (m *ObjectMetadata) GetMethod() string {
-	return m.method
-}
-
-// Learned from S3 sdk
-func (m *ObjectMetadata) setOSSHeaders(req *http.Request) {
-	metas := make(UserMetadata)
-	for k, v := range req.Header {
-		key := strings.ToLower(k)
-		tmp := ""
-		leng := len(v)
-		for i := 0; i < leng; i++ {
-			if i == 0 {
-				tmp = v[i]
-				continue
-			}
-			tmp = tmp + ","
-			tmp = tmp + v[i]
-		}
-		val := strings.ToLower(tmp)
-		if strings.HasPrefix(key, "x-oss-") {
-			//metas = append(metas, {key, val})
-			metas[key] = val
-		}
-	}
-	sort.Sort(metas)
-	m.userMetadata = metas
-}
-
-func (m *ObjectMetadata) setResource(req *http.Request) {
-	tmp := req.Header.Get("Host")
-	sp := strings.Split(tmp, ".")
-	bucket := sp[0]
-	name := req.URL.Path
-	name = fmt.Sprint("/", bucket, name)
-	m.resource = name
-}
-
-func (m *ObjectMetadata) signr() {
-	str := fmt.Sprint(m.method, "\n", m.contentMD5, "\n", m.contentType, "\n", m.date, "\n")
-	for k, v := range m.userMetadata {
-		str = fmt.Sprint(str, k, ":", v, "\n")
-	}
-	str = fmt.Sprint(str, m.resource)
-	fmt.Println(str)
-	mac := hmac.New(sha1.New, []byte(m.auth.SecretKey))
-	mac.Write([]byte(str))
-	dst := base64.StdEncoding.EncodeToString(mac.Sum(nil))
-	m.signature = dst
-
-	m.authorization = fmt.Sprint("OSS ", m.auth.AccessKey, ":", m.signature)
-	fmt.Println(dst)
-}
-
-func initMetadata(m *ObjectMetadata) {
-	m.auth = nil
-	m.ossClient = nil
-	m.host = ""
-}
-
-// UserMetadata Method
-func keyset(m map[string]string) []string {
-	ret := make([]string, len(m), len(m))
-	i := 0
-	for k, _ := range m {
-		ret[i] = k
-		i++
-	}
-	return ret
-}
-
-func (h UserMetadata) Itok(i int) string {
-	kset := keyset(h)
-	return kset[i]
-}
-
-func (h UserMetadata) Len() int {
-	return len(h)
-}
-
-func (h UserMetadata) Swap(i, j int) {
-	ik := h.Itok(i)
-	jk := h.Itok(j)
-	h[ik], h[jk] = h[jk], h[ik]
-}
-
-func (h UserMetadata) Less(i, j int) bool {
-	ret := true
-
-	ikey := h.Itok(i)
-	jkey := h.Itok(j)
-	b := strcmp(ikey, jkey)
-	switch b {
-	case 1:
-		ret = false
-		return ret
-	case 0:
-		return true
-	case -1:
-		ret = true
-		return ret
-	default:
-		return true
-	}
-
-}
-
-func strcmp(a, b string) int {
-	abytes := []byte(a)
-	bbytes := []byte(b)
-	alen := len(abytes)
-	blen := len(bbytes)
-	ret := byte(0)
-	if alen <= blen {
-		ret = 0
-		for i := 0; i < alen; i++ {
-			ret = abytes[i] - bbytes[i]
-			if ret < 0 {
-				return -1
-			}
-			if ret > 0 {
-				return 1
-			}
-		}
-		return -1
+	if v, ok := m.httpHeader[consts.RFC2616_METHOD]; ok {
+		return v[0]
 	} else {
-		ret = 0
-		for i := 0; i < blen; i++ {
-			ret = abytes[i] - bbytes[i]
-			if ret < 0 {
-				return -1
-			}
-			if ret > 0 {
-				return 1
-			}
-		}
-		return 1
+		return ""
+	}
+}
+
+func (obj *ObjectMetadata) SetMethod(method string) {
+	if _, ok := obj.httpHeader[consts.RFC2616_METHOD]; ok {
+		obj.httpHeader[consts.RFC2616_METHOD][0] = method
+		return
+	} else {
+		obj.httpHeader[consts.RFC2616_METHOD] = make([]string, 1)
+		obj.httpHeader[consts.RFC2616_METHOD][0] = method
+		return
+	}
+}
+
+func (m *ObjectMetadata) SetHost(host string) {
+	allHost := ""
+	allHost = m.GetBucketName() + "." + host
+	m.httpHeader[consts.RFC2616_HOST][0] = allHost
+}
+
+func (m *ObjectMetadata) WriteHttpHeaders() {
+	for k, v := range m.httpHeader {
+		m.Req.Header.Set(k, v[0])
 	}
 }
