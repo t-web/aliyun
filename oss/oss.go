@@ -68,6 +68,8 @@ func (o *OSSClient) execute(meta *ObjectMetadata) *http.Response {
 	}
 }
 
+// Bucket APIS
+
 func (o *OSSClient) PutBucket(bucketName, host string) *Bucket {
 	bucketName = strings.Trim(bucketName, " ")
 
@@ -82,10 +84,35 @@ func (o *OSSClient) PutBucket(bucketName, host string) *Bucket {
 
 	o.SignMeta(meta)
 
-	o.execute(meta)
-
+	resp := o.execute(meta)
+	log.Println("dd ", resp)
 	return nil
 }
+
+func (o *OSSClient) DeleteBucket(bucketName, host string) {
+	bucketName = strings.Trim(bucketName, " ")
+
+	meta := o.ObjectMetadata()
+	meta.SetHttpHeader(consts.RFC2616_METHOD, "DELETE")
+
+	meta.SetBucketName(bucketName)
+	meta.SetHttpHeader(consts.RFC2616_HOST, meta.GetBucketName()+"."+meta.OSSClient.Auth.Domain)
+	meta.SetContentType("")
+	t := time.Now()
+	meta.SetDate(t.UTC().Format(consts.RFC1123G))
+
+	o.SignMeta(meta)
+
+	resp := o.execute(meta)
+	log.Println("dd ", resp)
+	return
+}
+
+func (o *OSSClient) GetBucket(bucketname, host string) {
+
+}
+
+//
 
 func (c *OSSClient) ObjectMetadata() *ObjectMetadata {
 	ret, err := newObjectMetadata(c)

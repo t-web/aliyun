@@ -53,6 +53,10 @@ func Test001(t *testing.T) {
 
 	// right Authorization is : "OSS GhS53sqWHl8riOhH:zFBtZV19pyBqTt5yuBEdQOI0kSg="
 	o.SignMeta(meta)
+	au := meta.GetHttpHeader(consts.RFC2616_AUTHORIZATION)[0]
+	if au != "OSS GhS53sqWHl8riOhH:zFBtZV19pyBqTt5yuBEdQOI0kSg=" {
+		t.Fail()
+	}
 }
 
 // Test for PutBucket
@@ -61,4 +65,12 @@ func Test002(t *testing.T) {
 	host := consts.DOMAIN_DEFAULT
 	client := oss.NewOSSClient("GhS53sqWHl8riOhH", "dflue7j4z92WBPZQbCfexofFQBj9uP", consts.DOMAIN_DEFAULT)
 	client.PutBucket(bucketName, host)
+}
+
+// Test for DeleteBucket
+func Test003(t *testing.T) {
+	bucketName := "stduolc888"
+	host := consts.DOMAIN_DEFAULT
+	client := oss.NewOSSClient("GhS53sqWHl8riOhH", "dflue7j4z92WBPZQbCfexofFQBj9uP", consts.DOMAIN_DEFAULT)
+	client.DeleteBucket(bucketName, host)
 }
