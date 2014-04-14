@@ -1,13 +1,34 @@
 package oss
 
 import (
-	"time"
+// "time"
 )
 
 type Bucket struct {
-	Name       string
-	Owner      string
-	CreateDate time.Time
+	Name        string
+	Owner       string
+	Acl         string
+	Prefix      string
+	Marker      string
+	MaxKeys     string
+	Delimiter   string
+	IsTruncated bool
+
+	Contents []Content
+}
+
+type Content struct {
+	Key          string
+	LastModified string
+	ETag         string
+	Type         string
+	Size         string
+	StorageClass string
+}
+
+type Owner struct {
+	Id          string
+	DisplayName string
 }
 
 func NewBucket(name string) *Bucket {
@@ -17,5 +38,5 @@ func NewBucket(name string) *Bucket {
 }
 
 func (b *Bucket) String() string {
-	return "OSSBucket [name=" + b.Name + ", createDate=" + b.CreateDate.String() + ", owner=" + b.Owner + "]"
+	return "OSSBucket [name=" + b.Name + ", owner=" + b.Owner + ", acl=" + b.Acl + "]"
 }

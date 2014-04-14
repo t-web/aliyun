@@ -61,16 +61,21 @@ func Test001(t *testing.T) {
 
 // Test for PutBucket
 func Test002(t *testing.T) {
-	bucketName := "stduolc888"
-	host := consts.DOMAIN_DEFAULT
+	bucketName := "stduolctest"
+	client := oss.NewOSSClient("GhS53sqWHl8riOhH", "dflue7j4z92WBPZQbCfexofFQBj9uP", consts.DOMAIN_HANGZHOU)
+	client.PutBucket(bucketName)
+}
+
+// Test for GetBucket
+func Test003(t *testing.T) {
+	bucketName := "stduolc818"
 	client := oss.NewOSSClient("GhS53sqWHl8riOhH", "dflue7j4z92WBPZQbCfexofFQBj9uP", consts.DOMAIN_DEFAULT)
-	client.PutBucket(bucketName, host)
+	client.GetBucket(bucketName)
 }
 
 // Test for DeleteBucket
-func Test003(t *testing.T) {
-	bucketName := "stduolc888"
-	host := consts.DOMAIN_DEFAULT
+func Test004(t *testing.T) {
+	bucketName := "stduolctest"
 	client := oss.NewOSSClient("GhS53sqWHl8riOhH", "dflue7j4z92WBPZQbCfexofFQBj9uP", consts.DOMAIN_DEFAULT)
-	client.DeleteBucket(bucketName, host)
+	client.DeleteBucket(bucketName)
 }
